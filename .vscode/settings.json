@@ -1,0 +1,19 @@
+{
+  "editor.indentSize": 2,
+  "editor.tabSize": 2,
+  "editor.autoIndent": "full",
+  "editor.fontLigatures": true,
+  "editor.detectIndentation": false,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "files.associations": {
+    "array": "cpp",
+    "deque": "cpp",
+    "string": "cpp",
+    "unordered_map": "cpp",
+    "vector": "cpp",
+    "string_view": "cpp",
+    "initializer_list": "cpp"
+  }
+}
