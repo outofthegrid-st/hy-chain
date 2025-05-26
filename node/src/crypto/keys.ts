@@ -4,6 +4,7 @@ import type { BufferLike, MaybePromise } from "@rapid-d-kit/types";
 import { CancellationToken, ICancellationToken } from "@rapid-d-kit/async";
 import { type EntropyBufferRequest, type EntropyDevice, generateRandomBytes } from "ndforge";
 
+import { armor } from "./wraps";
 import { BufferReader, chunkToBuffer } from "../@internals/binary-protocol";
 import { HyChainException, HyChainNotImplementedException } from "../errors";
 
@@ -25,52 +26,59 @@ export type KnownAlgorithm =
 
 
 export type Alg = {
-  kind:  "secret" | "public" | "private";
+  kind: "secret" | "public" | "private";
   length: number;
-  ivLength?: number | undefined;
-  authTagLength?: number | undefined;
-  name?: string | undefined;
+  ivLength?: number;
+  authTagLength?: number;
+  name?: string;
 };
 
 
 export interface KeyDetails {
   label: BufferLike;
-  userId?: BufferLike | undefined;
+  userId?: BufferLike;
 }
 
 
 export type KeyInfo = KeyDetails & Alg & Partial<Omit<crypto.AsymmetricKeyDetails, "publicExponent"> & {
-  publicExponent?: number | bigint | string | undefined;
+  publicExponent?: number | bigint | string;
 }>;
 
 
 export interface IKey extends IDisposable {
   getDetails(): KeyDetails;
   setDetails(o: Partial<KeyDetails>): IKey;
-  read(length?: number | null | undefined): Buffer;
+  read(length?: number | null): MaybePromise<Buffer>;
+  master(): MaybePromise<Buffer>;
+  iv(): MaybePromise<Buffer | null>;
+  authTag(): MaybePromise<Buffer | null>;
+  collectAuthTag(tag: BufferLike): IKey;
+  leftBuffer(): MaybePromise<Buffer | null>;
+
   armor(): MaybePromise<Buffer>;
+  armor(encoding: BufferEncoding): MaybePromise<string>;
 }
 
 
 export type KeyReaderOptions = {
-  inputFormat?: "armored" | "base64" | "hex" | "pem" | "raw" | undefined;
-  algorithm?: KnownAlgorithm | Alg | undefined;
+  inputFormat?: "armored" | "base64" | "hex" | "pem" | "raw";
+  algorithm?: KnownAlgorithm | Alg;
 };
 
 
 const DEFAULT_RSA_MODULUS_LENGTH = 2048;
-const STANDARD_HASING_LENGTH = 256;
+const STANDARD_HASHING_LENGTH = 64;
 
 
 class HyChainKeyObject implements IKey {
-  readonly #keyMaterial: BufferReader;
-
+  #keyMaterial: BufferReader;
   #details: KeyDetails;
   #asymmetricDetails?: crypto.AsymmetricKeyDetails;
   #algorithm: Alg;
 
   #state = {
     disposed: false,
+    armorKey: null as Buffer | null,
     format: "raw" as NonNullable<KeyReaderOptions["inputFormat"]>,
   };
 
@@ -78,16 +86,17 @@ class HyChainKeyObject implements IKey {
     _source: BufferLike,
     _format: NonNullable<KeyReaderOptions["inputFormat"]>,
     _algorithm: Alg,
+    _armorKey: Buffer,
     _details?: KeyDetails,
     _asymmetricDetails?: crypto.AsymmetricKeyDetails // eslint-disable-line comma-dangle
   ) {
-    this.#keyMaterial = new BufferReader( chunkToBuffer(_source) );
-    
+    this.#keyMaterial = new BufferReader(chunkToBuffer(_source));
+
     this.#algorithm = _algorithm;
     this.#details = _details ?? { label: "$$default" };
     this.#asymmetricDetails = _asymmetricDetails;
-
-    this.#state.format = _format || "raw";
+    this.#state.format = _format;
+    this.#state.armorKey = Buffer.isBuffer(_armorKey) ? _armorKey : null;
   }
 
   public getInfo(): KeyInfo {
@@ -97,8 +106,10 @@ class HyChainKeyObject implements IKey {
       ...this.#details,
       ...this.#algorithm,
       ...this.#asymmetricDetails,
-      publicExponent: typeof this.#asymmetricDetails?.publicExponent === "bigint" ?
-        `bigint:${this.#asymmetricDetails.publicExponent.toString()}` : void 0,
+
+      publicExponent: typeof this.#asymmetricDetails?.publicExponent === "bigint"
+        ? `bigint:${this.#asymmetricDetails.publicExponent.toString()}`
+        : this.#asymmetricDetails?.publicExponent,
     };
   }
 
@@ -110,48 +121,68 @@ class HyChainKeyObject implements IKey {
   public setDetails(o: Partial<KeyDetails>): this {
     this.#EnsureNotDisposed();
 
-    this.#details = {
-      ...this.#details,
-      ...o,
-    };
+    this.#details = { ...this.#details, ...o };
 
     return this;
   }
 
-  public read(length?: number | null | undefined): Buffer {
+  public async read(length?: number | null): Promise<Buffer> {
     this.#EnsureNotDisposed();
+
+    await this.#ReadKey();
     return this.#keyMaterial.read(length ?? void 0);
   }
 
-  public armor(): Promise<Buffer> {
-    throw new HyChainNotImplementedException("HyChainKeyObject#armor()");
+  public armor(): Promise<Buffer>;
+  public armor(encoding: BufferEncoding): Promise<string>;
+
+  public async armor(encoding?: BufferEncoding): Promise<Buffer | string> {
+    const buffer = await this.#ReadKey();
+    const finalKey = armor(true, buffer, this.#state.armorKey);
+
+    return encoding && Buffer.isEncoding(encoding) ?
+      finalKey.toString(encoding) :
+      finalKey;
   }
 
-  public master(): Buffer {
+  public async master(): Promise<Buffer> {
     this.#EnsureNotDisposed();
 
-    if(this.#algorithm.kind === "secret")
-      return this.#keyMaterial.buffer.subarray(0, this.#algorithm.length);
+    const buffer = await this.#ReadKey();
 
-    return this.#keyMaterial.buffer;
+    return this.#algorithm.kind === "secret"
+      ? buffer.subarray(0, this.#algorithm.length)
+      : buffer;
   }
 
-  public iv(): Buffer | null {
+  public async iv(): Promise<Buffer | null> {
     this.#EnsureNotDisposed();
 
-    if(this.#algorithm.kind !== "secret")
+    if(this.#algorithm.kind !== "secret" || !this.#algorithm.ivLength)
       return null;
 
-    return null; // Not Implemented Yet
-  }
+    const offset = this.#algorithm.length;
+    const end = offset + this.#algorithm.ivLength;
 
-  public authTag(): Buffer | null {
-    this.#EnsureNotDisposed();
-
-    if(this.#algorithm.kind !== "secret")
+    if(end > this.#keyMaterial.byteLength)
       return null;
 
-    return null; // Not Implemented Yet
+    return (await this.#ReadKey()).subarray(offset, end);
+  }
+
+  public async authTag(): Promise<Buffer | null> {
+    this.#EnsureNotDisposed();
+
+    if(this.#algorithm.kind !== "secret" || !this.#algorithm.authTagLength)
+      return null;
+
+    const offset = this.#algorithm.length + (this.#algorithm.ivLength ?? 0);
+    const end = offset + this.#algorithm.authTagLength;
+
+    if(end > this.#keyMaterial.byteLength)
+      return null;
+
+    return (await this.#ReadKey()).subarray(offset, end);
   }
 
   public collectAuthTag(tag: BufferLike): this {
@@ -161,17 +192,34 @@ class HyChainKeyObject implements IKey {
       throw new HyChainException("Cannot collect auth tag for an asymmetric key", "ERR_UNSUPPORTED_OPERATION");
     }
 
-    void tag;
+    const leftIndex = this.#algorithm.length + (this.#algorithm.ivLength ?? 0);
+    const buffer = this.#ReadKey();
+
+    const leftBuffer = buffer.subarray(0, leftIndex);
+    const rightBuffer = buffer.subarray(leftIndex);
+
+    this.#keyMaterial = new BufferReader(Buffer.concat([
+      leftBuffer,
+      chunkToBuffer(tag),
+      rightBuffer,
+    ]));
+
+    this.#state.format = "raw";
     return this;
   }
 
-  public leftBuffer(): Buffer | null {
+  public async leftBuffer(): Promise<Buffer | null> {
     this.#EnsureNotDisposed();
 
     if(this.#algorithm.kind !== "secret")
       return null;
 
-    return null; // Not Implemented Yet
+    const requiredLength = this.#algorithm.length + (this.#algorithm.ivLength ?? 0) + (this.#algorithm.authTagLength ?? 0);
+
+    if(requiredLength > this.#keyMaterial.byteLength)
+      return null;
+
+    return (await this.#ReadKey()).subarray(requiredLength);
   }
 
   public dispose(): void {
@@ -182,122 +230,42 @@ class HyChainKeyObject implements IKey {
   }
 
   #EnsureNotDisposed(): void {
-    if(this.#state.disposed) {
+    if (this.#state.disposed) {
       throw new HyChainException("Key object is already disposed and cannot be used anymore", "ERR_RESOURCE_DISPOSED");
     }
   }
 
-  public static generateAsymmetricKeyPair(
-    algorithm: "RSA" | "ECDSA" | "Ed25519",
-    o?: crypto.AsymmetricKeyDetails & {
-      paramEncoding?: "explicit" | "named"
-    } // eslint-disable-line comma-dangle
-  ): Promise<readonly [HyChainKeyObject, HyChainKeyObject]> {
-    switch(algorithm) {
-      case "RSA": {
-        let mLength = o?.modulusLength ?? DEFAULT_RSA_MODULUS_LENGTH;
+  #ReadKey(): Buffer {
+    if(this.#state.format === "raw")
+      return this.#keyMaterial.buffer;
 
-        if(![DEFAULT_RSA_MODULUS_LENGTH, DEFAULT_RSA_MODULUS_LENGTH * 2].includes(mLength)) {
-          mLength = DEFAULT_RSA_MODULUS_LENGTH;
-        }
+    if(["base64", "hex"].includes(this.#state.format)) {
+      const buffer = Buffer.from(this.#keyMaterial.buffer.toString(), this.#state.format as "hex" | "base64");
+      this.#keyMaterial = new BufferReader(buffer);
 
-        return new Promise((resolve, reject) => {
-          crypto.generateKeyPair("rsa", {
-            modulusLength: mLength,
-            publicExponent: typeof o?.publicExponent === "number" ? o.publicExponent : void 0,
-          }, (err, pko, sko) => {
-            // eslint-disable-next-line no-extra-boolean-cast
-            if(!!err) return reject(err);
-            
-            const publicKey = new HyChainKeyObject(
-              pko.export({ format: "der", type: "pkcs1" }),
-              "raw",
-              { kind: "public", name: (pko.asymmetricKeyType ?? "RSA").toUpperCase(), length: mLength },
-              void 0,
-              {
-                ...{ publicExponent: o?.publicExponent, modulusLength: mLength },
-                ...pko.asymmetricKeyDetails,
-              } // eslint-disable-line comma-dangle
-            );
-
-            const privateKey = new HyChainKeyObject(
-              sko.export({ format: "der", type: "pkcs1" }),
-              "raw",
-              { kind: "private", name: (sko.asymmetricKeyType ?? "RSA").toUpperCase(), length: mLength },
-              void 0,
-              {
-                ...{ publicExponent: o?.publicExponent, modulusLength: mLength },
-                ...sko.asymmetricKeyDetails,
-              } // eslint-disable-line comma-dangle
-            );
-
-            resolve([ publicKey, privateKey ]);
-          });
-        });
-      } break;
-    
-      case "ECDSA": {
-        return new Promise((resolve, reject) => {
-          crypto.generateKeyPair("ec", {
-            namedCurve: "secp256k1",
-            paramEncoding: o?.paramEncoding,
-          }, (err, pko, sko) => {
-            // eslint-disable-next-line no-extra-boolean-cast
-            if(!!err) return reject(err);
-
-            const publicKey = new HyChainKeyObject(
-              pko.export({ format: "der", type: "spki" }),
-              "raw",
-              { kind: "public", name: (pko.asymmetricKeyType ?? "ECDSA").toUpperCase(), length: 33 },
-              void 0,
-              pko.asymmetricKeyDetails // eslint-disable-line comma-dangle
-            );
-
-            const privateKey = new HyChainKeyObject(
-              sko.export({ format: "der", type: "sec1" }),
-              "raw",
-              { kind: "private", name: (sko.asymmetricKeyType ?? "ECDSA").toUpperCase(), length: 32 },
-              void 0,
-              sko.asymmetricKeyDetails // eslint-disable-line comma-dangle
-            );
-
-            resolve([ publicKey, privateKey ]);
-          });
-        });
-      } break;
-
-      case "Ed25519": {
-        return new Promise((resolve, reject) => {
-          crypto.generateKeyPair("ed25519",
-            { },
-            (err, pko, sko) => {
-              // eslint-disable-next-line no-extra-boolean-cast
-              if(!!err) return reject(err);
-
-              const publicKey = new HyChainKeyObject(
-                pko.export({ format: "der", type: "spki" }),
-                "raw",
-                { kind: "public", name: (pko.asymmetricKeyType ?? "ed25519").toUpperCase(), length: 32 },
-                void 0,
-                pko.asymmetricKeyDetails // eslint-disable-line comma-dangle
-              );
-
-              const privateKey = new HyChainKeyObject(
-                sko.export({ format: "der", type: "pkcs8" }),
-                "raw",
-                { kind: "private", name: (sko.asymmetricKeyType ?? "ed25519").toUpperCase(), length: 32 },
-                void 0,
-                sko.asymmetricKeyDetails // eslint-disable-line comma-dangle
-              );
-
-              resolve([ publicKey, privateKey ]);
-            });
-        });
-      } break;
+      this.#state.format = "raw";
+      return this.#keyMaterial.buffer;
     }
+
+    throw new HyChainNotImplementedException("HyChainKeyObject##ReadKey()");
   }
 
-  public static async generateSymmetricKey(
+  public static generateAsymmetricKeyPair(
+    algorithm: "RSA" | "ECDSA" | "Ed25519",
+    o?: crypto.AsymmetricKeyDetails & { paramEncoding?: "explicit" | "named" } // eslint-disable-line comma-dangle
+  ): Promise<readonly [HyChainKeyObject, HyChainKeyObject]> {
+    return this.#DoAsymmetricKeyGeneration(algorithm, o);
+  }
+
+  public static generateSymmetricKey(
+    algorithm: Exclude<KnownAlgorithm, "RSA" | "ECDSA" | "Ed25519"> | Alg,
+    entropy?: EntropyDevice | EntropyBufferRequest,
+    token: ICancellationToken = CancellationToken.None // eslint-disable-line comma-dangle
+  ): Promise<HyChainKeyObject> {
+    return this.#DoSymmetricKeyGeneration(algorithm, entropy, token);
+  }
+
+  static async #DoSymmetricKeyGeneration(
     algorithm: Exclude<KnownAlgorithm, "RSA" | "ECDSA" | "Ed25519"> | Alg,
     entropy?: EntropyDevice | EntropyBufferRequest,
     token: ICancellationToken = CancellationToken.None // eslint-disable-line comma-dangle
@@ -306,82 +274,183 @@ class HyChainKeyObject implements IKey {
       throw new HyChainException("Symmetric key generation was cancelled by token", "ERR_TOKEN_CANCELLED");
     }
 
-    const { length, ivLength = 0, authTagLength = 0 } = _getAlgorithmLenghts(algorithm);
-    const finalLength = length + ivLength + authTagLength;
+    const { length, ivLength = 0, authTagLength = 0 } = _getAlgorithmLengths(algorithm);
+    const finalLength = length + ivLength + authTagLength + 8;
 
-    let buffer: Buffer;
-
-    if(!entropy) {
-      buffer = await generateRandomBytes(finalLength, token);
-    } else {
-      buffer = await generateRandomBytes(finalLength, entropy, token);
-    }
-
-    const algorithmName = typeof algorithm === "string" ? algorithm : algorithm.name;
+    const buffer = await (
+      entropy ?
+        generateRandomBytes(finalLength, entropy, token) :
+        generateRandomBytes(finalLength, token)
+    );
 
     if(token.isCancellationRequested) {
       throw new HyChainException("Symmetric key generation was cancelled by token", "ERR_TOKEN_CANCELLED");
     }
 
+    const armorKey = await (await HyChainKeyObject.#DoSymmetricKeyGeneration("AES-CBC-128", entropy, token))
+      .read();
+
     return new HyChainKeyObject(
       buffer,
       "raw",
-      { kind: "secret", length, authTagLength, ivLength, name: algorithmName } // eslint-disable-line comma-dangle
+      {
+        kind: "secret",
+        length,
+        authTagLength,
+        ivLength,
+        name: typeof algorithm === "string" ?
+          algorithm :
+          algorithm.name,
+      },
+      armorKey // eslint-disable-line comma-dangle
     );
+  }
+
+  static async #DoAsymmetricKeyGeneration(
+    algorithm: "RSA" | "ECDSA" | "Ed25519",
+    o?: crypto.AsymmetricKeyDetails & { paramEncoding?: "explicit" | "named" },
+    entropy?: EntropyDevice | EntropyBufferRequest,
+    token?: ICancellationToken // eslint-disable-line comma-dangle
+  ): Promise<readonly [HyChainKeyObject, HyChainKeyObject]> {
+    const armorKey = await (await HyChainKeyObject.#DoSymmetricKeyGeneration("AES-CBC-128", entropy, token))
+      .read();
+
+    switch(algorithm) {
+      case "RSA": {
+        const mLength = [DEFAULT_RSA_MODULUS_LENGTH, DEFAULT_RSA_MODULUS_LENGTH * 2].includes(o?.modulusLength ?? 0)
+          ? o!.modulusLength!
+          : DEFAULT_RSA_MODULUS_LENGTH;
+
+        return new Promise((resolve, reject) => {
+          crypto.generateKeyPair("rsa", {
+            modulusLength: mLength,
+            publicExponent: typeof o?.publicExponent === "number" ? o.publicExponent : undefined,
+          }, (err, pko, sko) => {
+            // eslint-disable-next-line no-extra-boolean-cast
+            if(!!err)
+              return reject(err);
+
+            resolve([
+              new HyChainKeyObject(
+                pko.export({ format: "der", type: "pkcs1" }),
+                "raw",
+                { kind: "public", name: "RSA", length: mLength },
+                armorKey,
+                void 0,
+                pko.asymmetricKeyDetails,
+              ),
+              
+              new HyChainKeyObject(
+                sko.export({ format: "der", type: "pkcs1" }),
+                "raw",
+                { kind: "private", name: "RSA", length: mLength },
+                armorKey,
+                void 0,
+                sko.asymmetricKeyDetails,
+              ),
+            ]);
+          });
+        });
+      } break;
+      case "ECDSA": {
+        return new Promise((resolve, reject) => {
+          crypto.generateKeyPair("ec", {
+            namedCurve: "secp256k1",
+            paramEncoding: o?.paramEncoding,
+          }, (err, pko, sko) => {
+            // eslint-disable-next-line no-extra-boolean-cast
+            if(!!err)
+              return reject(err);
+
+            resolve([
+              new HyChainKeyObject(
+                pko.export({ format: "der", type: "spki" }),
+                "raw",
+                { kind: "public", name: "ECDSA", length: 33 },
+                armorKey,
+                void 0,
+                pko.asymmetricKeyDetails,
+              ),
+
+              new HyChainKeyObject(
+                sko.export({ format: "der", type: "sec1" }),
+                "raw",
+                { kind: "private", name: "ECDSA", length: 32 },
+                armorKey,
+                void 0,
+                sko.asymmetricKeyDetails,
+              ),
+            ]);
+          });
+        });
+      } break;
+      case "Ed25519": {
+        return new Promise((resolve, reject) => {
+          crypto.generateKeyPair("ed25519", {}, (err, pko, sko) => {
+            // eslint-disable-next-line no-extra-boolean-cast
+            if(!!err)
+              return reject(err);
+
+            resolve([
+              new HyChainKeyObject(
+                pko.export({ format: "der", type: "spki" }),
+                "raw",
+                { kind: "public", name: "ED25519", length: 32 },
+                armorKey,
+                void 0,
+                pko.asymmetricKeyDetails,
+              ),
+
+              new HyChainKeyObject(
+                sko.export({ format: "der", type: "pkcs8" }),
+                "raw",
+                { kind: "private", name: "ED25519", length: 32 },
+                armorKey,
+                void 0,
+                sko.asymmetricKeyDetails,
+              ),
+            ]);
+          });
+        });
+      } break;
+      default:
+        throw new HyChainException(`Failed to generate asymmetric key to unknown algorithm '${algorithm}'`, "ERR_INVALID_ARGUMENT");
+    }
   }
 }
 
-
-function _getAlgorithmLenghts(algorithm: Exclude<KnownAlgorithm, "RSA" | "ECDSA" | "Ed25519"> | Alg): {
+function _getAlgorithmLengths(algorithm: Exclude<KnownAlgorithm, "RSA" | "ECDSA" | "Ed25519"> | Alg): {
   length: number;
   ivLength?: number;
   authTagLength?: number;
 } {
-  if(typeof algorithm === "object") return {
-    length: algorithm.length,
-    ivLength: algorithm.ivLength,
-    authTagLength: algorithm.authTagLength,
-  };
+  if(typeof algorithm === "object")
+    return {
+      length: algorithm.length,
+      ivLength: algorithm.ivLength,
+      authTagLength: algorithm.authTagLength,
+    };
 
   switch(algorithm) {
     case "SHA256":
     case "SHA384":
-    case "SHA512": {
-      return { length: STANDARD_HASING_LENGTH };
-    } break;
-    
-    case "AES-CBC-128": {
+    case "SHA512":
+      return { length: STANDARD_HASHING_LENGTH };
+    case "AES-CBC-128":
       return { length: 16, ivLength: 16 };
-    } break;
-
-    case "AES-CBC-256": {
+    case "AES-CBC-256":
       return { length: 32, ivLength: 16 };
-    } break;
-
-    case "AES-GCM-128": {
+    case "AES-GCM-128":
+    case "AES-CCM-128":
       return { length: 16, ivLength: 12, authTagLength: 16 };
-    } break;
-
-    case "AES-GCM-256": {
+    case "AES-GCM-256":
+    case "AES-CCM-256":
       return { length: 32, ivLength: 12, authTagLength: 16 };
-    } break;
-
-    case "AES-CCM-128": {
-      return { length: 16, ivLength: 12, authTagLength: 16 };
-    } break;
-
-    case "AES-CCM-256": {
-      return { length: 32, ivLength: 12, authTagLength: 16 };
-    } break;
-
-    case "CHACHA20": {
+    case "CHACHA20":
       return { length: 32, ivLength: 12 };
-    } break;
-    default: {
+    default:
       throw new HyChainException(`Unable to generate a key for unknown algorithm '${algorithm}'`, "ERR_INVALID_ARGUMENT");
-    } break;
   }
 }
-
 
 export default HyChainKeyObject;
