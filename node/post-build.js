@@ -23,7 +23,8 @@ async function main() {
   }
 
   
-  await runloop.createTask(() => {
+  if(process.env.NODE_ENV === "production") {
+    await runloop.createTask(() => {
     console.log("[LOG] deleting useless content...");
     
     return rimraf(BUILD_DIR, {
@@ -31,7 +32,21 @@ async function main() {
       value: ["*.spec.ts", "test.js", "test.d.ts"],
     }, false);
   }).wait();
+  }
   
+  console.log("[LOG] done.");
+  console.log("[LOG] updating dependencies list...");
+
+  const sourcePkg = JSON.parse(await promises.readFile(path.join(process.cwd(), "package.json")));
+  const buildPkg = JSON.parse(await promises.readFile(path.join(process.cwd(), "package.build.json")));
+
+  buildPkg["dependencies"] = sourcePkg["dependencies"];
+
+  await promises.writeFile(
+    path.join(process.cwd(), "package.build.json"),
+    JSON.stringify(buildPkg, null, 2).trim() // eslint-disable-line comma-dangle
+  );
+
   console.log("[LOG] done.");
 }
 

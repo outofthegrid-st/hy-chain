@@ -1,6 +1,6 @@
 {
   "name": "hy-chain",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "main": "dist/index.js",
   "license": "CC0-1.0",
   "repository": "https://github.com/outofthegrid-st/hy-chain.git",
@@ -37,6 +37,11 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "array-t": "^0.1.1"
+    "@rapid-d-kit/async": "^0.1.1",
+    "@rapid-d-kit/disposable": "^0.1.1",
+    "@rapid-d-kit/safe": "^0.1.2",
+    "@rapid-d-kit/types": "^0.1.1",
+    "array-t": "^0.1.1",
+    "ndforge": "^1.5.3"
   }
 }
