@@ -13,7 +13,7 @@ class Transaction<TPayload = unknown> implements HyChainFormat.ITransaction<TPay
   public constructor(
     payload: TPayload,
     seq: number,
-    options?: unknown // eslint-disable-line comma-dangle
+    // options?: unknown // eslint-disable-line comma-dangle
   ) {
     this.#payload = payload;
 

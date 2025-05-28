@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-namespace, no-inner-declarations */
 
 import * as crypto from "node:crypto";
+import { LogarithmicArray } from "array-t";
 import type { BufferLike } from "@rapid-d-kit/types";
 import { IDisposable } from "@rapid-d-kit/disposable";
 import { Readable as ReadableStream } from "node:stream";
@@ -8,6 +9,7 @@ import { Readable as ReadableSource } from "ndforge/stream";
 import { CancellationToken, ICancellationToken } from "@rapid-d-kit/async";
 
 import { consumeBuffer } from "./util";
+import { array } from "../@internals/util";
 import { HyChainException } from "../errors";
 import { BufferReader, BufferWriter, chunkToBuffer, IReader, serialize } from "../@internals/binary-protocol";
 
@@ -81,19 +83,21 @@ export class HashEntity implements IDisposable {
 
 
 export namespace MerkleTree {
-  export async function computeRoot(hashes: readonly BufferLike[]): Promise<HashEntity> {
-    if(hashes.length < 1)
+  export async function computeRoot(hashes: readonly BufferLike[] | LogarithmicArray<BufferLike>): Promise<HashEntity> {
+    const hashesList = array("log", hashes);
+
+    if(hashesList.size() < 1)
       return await hashData("");
 
-    let level = hashes.map(chunkToBuffer);
-
-    while(level.length > 1) {
-      const nextLevel: Buffer[] = [];
+    let level = hashesList.map(chunkToBuffer);
+  
+    while(level.size() > 1) {
       const hashTasks: Promise<Buffer>[] = [];
+      const nextLevel: LogarithmicArray<Buffer> = new LogarithmicArray(80);
 
-      for(let i = 0; i < level.length; i += 2) {
-        const left = level[i];
-        const right = level[i + 1] ?? left;
+      for(let i = 0; i < level.size(); i += 2) {
+        const left = level.get(i);
+        const right = level.get(i + 1) ?? left;
 
         const task = async () => {
           const combinedHash = await hashData(Buffer.concat([left, right]));
@@ -107,7 +111,7 @@ export namespace MerkleTree {
       level = nextLevel;
     }
 
-    return new HashEntity(level[0]);
+    return new HashEntity(level.get(0));
   }
 
   export async function createRoot<T>(payload: T): Promise<HashEntity> {
@@ -135,20 +139,20 @@ export namespace MerkleTree {
   }
 
   export async function generateProof(
-    hashes: readonly BufferLike[],
+    hashes: readonly BufferLike[] | LogarithmicArray<BufferLike>,
     target: BufferLike | HashEntity // eslint-disable-line comma-dangle
-  ): Promise<readonly HashEntity[]> {
-    const proof: HashEntity[] = [];
+  ): Promise<LogarithmicArray<HashEntity>> {
+    const proof: LogarithmicArray<HashEntity> = new LogarithmicArray(80);
 
     if(!(target instanceof HashEntity)) {
       target = new HashEntity(chunkToBuffer(target));
     }
 
     const hashIndexMap = new Map<string, number>();
-    const hashBuffers = hashes.map(chunkToBuffer);
+    const hashBuffers = array("log", hashes).map(chunkToBuffer);
 
-    for(let i = 0; i < hashBuffers.length; i++) {
-      const h = await hashData(hashBuffers[i]);
+    for(let i = 0; i < hashBuffers.size(); i++) {
+      const h = await hashData(hashBuffers.get(i));
       hashIndexMap.set(h.buffer().toString("hex"), i);
     }
 
@@ -161,13 +165,13 @@ export namespace MerkleTree {
 
     let level = hashBuffers;
 
-    while(level.length > 1) {
-      const nextLevel: Buffer[] = [];
+    while(level.size() > 1) {
       const levelProofTasks: Promise<void>[] = [];
+      const nextLevel: LogarithmicArray<Buffer> = new LogarithmicArray(80);
 
-      for(let i = 0; i < level.length; i += 2) {
-        const left = level[i];
-        const right = level[i + 1] ?? left;
+      for(let i = 0; i < level.size(); i += 2) {
+        const left = level.get(i);
+        const right = level.get(i + 1) ?? left;
 
         const combineTask = async () => {
           const combinedHash = await hashData(Buffer.concat([left, right]));
@@ -177,7 +181,7 @@ export namespace MerkleTree {
             const sibling = (i === index) ? right : left;
 
             proof.push(new HashEntity(sibling));
-            index = nextLevel.length - 1;
+            index = nextLevel.size() - 1;
           }
         };
 
@@ -194,15 +198,17 @@ export namespace MerkleTree {
 
   export async function verifyProof(
     target: HashEntity | BufferLike,
-    proof: readonly HashEntity[],
+    proof: readonly HashEntity[] | LogarithmicArray<HashEntity>,
     root: HashEntity | BufferLike // eslint-disable-line comma-dangle
   ): Promise<boolean> {
     let hash = target instanceof HashEntity ?
       target.buffer() :
-      chunkToBuffer(target); 
+      chunkToBuffer(target);
 
-    for(let i = 0; i < proof.length; i++) {
-      const sibling = proof[i].buffer();
+    proof = array("log", proof);
+
+    for(let i = 0; i < proof.size(); i++) {
+      const sibling = proof.get(i).buffer();
 
       hash = (await hashData(Buffer.concat([hash, sibling])))
         .buffer();

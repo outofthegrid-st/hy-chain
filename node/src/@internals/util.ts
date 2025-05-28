@@ -1,3 +1,5 @@
+import { LogarithmicArray } from "array-t";
+
 export const MAX_SAFE_SMALL_INTEGER = 1 << 0x1E;
 export const MIN_SAFE_SMALL_INTEGER = -(1 << 0x1E);
 
@@ -73,4 +75,33 @@ export function isBase64(str: unknown): str is string {
   } catch {
     return false;
   }
+}
+
+
+export function array<T>(target: "native", source: T | T[]): T[];
+export function array<T>(target: "log", source: T | T[] | readonly T[] | LogarithmicArray<T>): LogarithmicArray<T>;
+export function array<T>(target: "native" | "log", source: T | T[]): T[] | LogarithmicArray<T> {
+  if(target === "log") {
+    if(source instanceof LogarithmicArray)
+      return source;
+
+    const sourcesList = Array.isArray(source) ? source : [source];
+    let chunkSize = 64;
+
+    if(sourcesList.length < 1000) {
+      chunkSize = 32;
+    } else if(sourcesList.length >= 50000) {
+      chunkSize = 128;
+    }
+
+    const arr = new LogarithmicArray<T>(chunkSize);
+
+    for(let i = 0; i < sourcesList.length; i++) {
+      arr.push(sourcesList[i]);
+    }
+
+    return arr;
+  }
+
+  return Array.isArray(source) ? source : [source];
 }
