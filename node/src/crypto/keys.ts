@@ -4,7 +4,7 @@ import type { BufferLike, MaybePromise } from "@rapid-d-kit/types";
 import { CancellationToken, ICancellationToken } from "@rapid-d-kit/async";
 import { type EntropyBufferRequest, type EntropyDevice, generateRandomBytes } from "ndforge";
 
-import { armor } from "./wraps";
+import { armor, dearmor } from "./wraps";
 import { BufferReader, chunkToBuffer } from "../@internals/binary-protocol";
 import { HyChainException, HyChainNotImplementedException } from "../errors";
 
@@ -239,11 +239,23 @@ class HyChainKeyObject implements IKey {
     if(this.#state.format === "raw")
       return this.#keyMaterial.buffer;
 
-    if(["base64", "hex"].includes(this.#state.format)) {
+    if(
+      this.#state.format === "base64" ||
+      this.#state.format === "hex"
+    ) {
       const buffer = Buffer.from(this.#keyMaterial.buffer.toString(), this.#state.format as "hex" | "base64");
       this.#keyMaterial = new BufferReader(buffer);
 
       this.#state.format = "raw";
+      return this.#keyMaterial.buffer;
+    }
+
+    if(this.#state.format === "armored") {
+      const buffer = this.#keyMaterial.read();
+
+      this.#keyMaterial = new BufferReader(dearmor(buffer, this.#state.armorKey));
+      this.#state.format = "raw";
+
       return this.#keyMaterial.buffer;
     }
 
@@ -287,8 +299,7 @@ class HyChainKeyObject implements IKey {
       throw new HyChainException("Symmetric key generation was cancelled by token", "ERR_TOKEN_CANCELLED");
     }
 
-    const armorKey = await (await HyChainKeyObject.#DoSymmetricKeyGeneration("AES-CBC-128", entropy, token))
-      .read();
+    const armorKey = await generateRandomBytes(40, entropy! ?? void 0, token);
 
     return new HyChainKeyObject(
       buffer,
@@ -312,8 +323,7 @@ class HyChainKeyObject implements IKey {
     entropy?: EntropyDevice | EntropyBufferRequest,
     token?: ICancellationToken // eslint-disable-line comma-dangle
   ): Promise<readonly [HyChainKeyObject, HyChainKeyObject]> {
-    const armorKey = await (await HyChainKeyObject.#DoSymmetricKeyGeneration("AES-CBC-128", entropy, token))
-      .read();
+    const armorKey = await generateRandomBytes(40, entropy! ?? void 0, token);
 
     switch(algorithm) {
       case "RSA": {

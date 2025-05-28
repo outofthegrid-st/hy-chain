@@ -6,7 +6,7 @@
 /** @type {import('jest').Config} */
 const config = {
   clearMocks: true,
-  testMatch: ['**/*.spec.ts'],
+  testMatch: ["**/*.spec.ts"],
 };
   
 module.exports = config;

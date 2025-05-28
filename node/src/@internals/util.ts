@@ -51,3 +51,26 @@ export function devNull(object: unknown): void {
   object = null!;
   void object;
 }
+
+
+export function stripQuotes(value: string): string {
+  if (
+    (value.startsWith("\"") && value.endsWith("\"")) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) return value.slice(1, -1);
+
+  return value;
+}
+
+
+export function isBase64(str: unknown): str is string {
+  if(!str || typeof str !== "string") return false;
+
+  try {
+    // eslint-disable-next-line no-useless-escape
+    const base64Regex = /^(?:[A-Za-z0-9+\/]{4})*?(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/;
+    return (str.length % 4 === 0 && base64Regex.test(str)) || btoa(atob(str)) === str;
+  } catch {
+    return false;
+  }
+}

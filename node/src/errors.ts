@@ -1,3 +1,5 @@
+import { IOStream } from "ndforge";
+
 import { devNull } from "./@internals/util";
 import { jsonSafeStringify } from "./@internals/safe-json";
 
@@ -12,25 +14,30 @@ enum ERROR_CODE {
   ERR_INVALID_ARGUMENT = 1081,
   ERR_TOKEN_CANCELLED = 1053,
   ERR_CRYPTO_KEY_SHORT = 10382,
+  ERR_MAGIC_NUMBER_MISSMATCH = 10878,
+  ERR_INVALID_BITFLAG = 11854,
+  ERR_STREAM_CLOSED = 1123,
+  ERR_INVALID_TYPE = 1185,
+  ERR_MISSING_OBJECT = 1179,
 }
 
 
-export class HyChainException extends Error {
+export class HyChainException extends IOStream.Exception.Throwable {
   public override readonly name: string;
-  public readonly code: number;
 
   public constructor(
     message: string,
-    code: keyof typeof ERROR_CODE | number = "UNKNOWN_ERROR",
-    public readonly context?: unknown // eslint-disable-line comma-dangle
+    c: keyof typeof ERROR_CODE | number = "UNKNOWN_ERROR",
+    context?: Record<string, unknown> // eslint-disable-line comma-dangle
   ) {
-    super(message);
+    
+    const code = -Math.abs(typeof c === "number" ?
+      c : 
+      ERROR_CODE[c] ?? ERROR_CODE.UNKNOWN_ERROR);
+
+    super(message, { code, context });
 
     this.name = "HyChainException";
-    
-    this.code = -Math.abs(typeof code === "number" ?
-      code : 
-      ERROR_CODE[code] ?? ERROR_CODE.UNKNOWN_ERROR);
   }
 
   public getCode(): string {

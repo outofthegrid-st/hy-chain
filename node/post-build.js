@@ -25,13 +25,14 @@ async function main() {
   
   if(process.env.NODE_ENV === "production") {
     await runloop.createTask(() => {
-    console.log("[LOG] deleting useless content...");
-    
-    return rimraf(BUILD_DIR, {
-      rule: "endsWith",
-      value: ["*.spec.ts", "test.js", "test.d.ts"],
-    }, false);
-  }).wait();
+      console.log("[LOG] deleting useless content...");
+      
+      return rimraf(BUILD_DIR, {
+        rule: "endsWith",
+        value: [".spec.js", ".spec.d.ts", "test.js", "test.d.ts"],
+      }, false);
+    })
+    .wait();
   }
   
   console.log("[LOG] done.");

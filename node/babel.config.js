@@ -1,20 +1,20 @@
 module.exports = {
   presets: [
     [
-      '@babel/preset-env',
+      "@babel/preset-env",
       {
         targets: {
-          node: '18',
+          node: "18",
         },
       },
     ],
-    '@babel/preset-typescript',
+    "@babel/preset-typescript",
   ],
   plugins: [
-    '@babel/plugin-transform-typescript',
-    '@babel/plugin-transform-private-methods',
-    '@babel/plugin-transform-class-properties',
-    ['module-resolver', {
+    "@babel/plugin-transform-typescript",
+    "@babel/plugin-transform-private-methods",
+    "@babel/plugin-transform-class-properties",
+    ["module-resolver", {
       alias: { },
     }],
   ],

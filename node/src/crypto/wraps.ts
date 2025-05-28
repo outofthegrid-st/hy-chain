@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import type { BufferLike } from "@rapid-d-kit/types";
 
 import { HyChainException } from "../errors";
+import { isBase64 } from "../@internals/util";
 import { BufferWriter, chunkToBuffer } from "../@internals/binary-protocol";
 
 
@@ -61,6 +62,72 @@ export function armor(
     result.toString(encoding) :
     result;
 }
+
+
+export function dearmor(
+  source: BufferLike,
+  key?: BufferLike | null,
+  inputEncoding?: BufferEncoding
+): Buffer;
+
+export function dearmor(
+  source: BufferLike,
+  key: BufferLike | null,
+  inputEncoding: BufferEncoding | undefined,
+  outputEncoding: BufferEncoding
+): string;
+
+export function dearmor(
+  source: BufferLike,
+  key?: BufferLike | null,
+  inputEncoding?: BufferEncoding,
+  outputEncoding?: BufferEncoding,
+): Buffer | string {
+  let buffer: Buffer;
+
+  if(typeof source === "string") {
+    if(inputEncoding && Buffer.isEncoding(inputEncoding)) {
+      buffer = Buffer.from(source, inputEncoding);
+    } else if(isBase64(source)) {
+      buffer = Buffer.from(source, "base64");
+    } else {
+      buffer = chunkToBuffer(source);
+    }
+  } else {
+    buffer = chunkToBuffer(source);
+  }
+
+  const magicLength = ARMORED_CONTENT_MAGIC_BUFFER.length;
+
+  if(buffer.subarray(0, magicLength).compare(ARMORED_CONTENT_MAGIC_BUFFER) !== 0) {
+    throw new HyChainException("Invalid armored content magic header", "ERR_MAGIC_NUMBER_MISSMATCH");
+  }
+
+  const flag = buffer[magicLength];
+  const content = buffer.subarray(magicLength + 1);
+
+  let result: Buffer;
+
+  if(flag === 0) {
+    result = content;
+  } else if(flag === 1) {
+    const [masterKey, iv] = parseKey(key);
+    const decipher = crypto.createDecipheriv("aes-128-cbc", masterKey, iv);
+
+    const writer = new BufferWriter();
+    writer.write(decipher.update(content));
+    writer.write(decipher.final());
+
+    result = writer.drain();
+  } else {
+    throw new HyChainException("Unknown armor flag", "ERR_INVALID_BITFLAG");
+  }
+
+  return outputEncoding && Buffer.isEncoding(outputEncoding) ?
+    result.toString(outputEncoding) :
+    result;
+}
+
 
 
 const ALGORITHM = { length: 16, ivLength: 16 };
