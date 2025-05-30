@@ -31,7 +31,7 @@ namespace HyChainFormat {
     readonly publicBlockId: BlockId;
     readonly previousHash: HashEntity;
     readonly sequence: number;
-    readonly transaction: ITransaction<TPayload>;
+    readonly transactions: readonly ITransaction<TPayload>[];
     readonly headers: BlockHeaders;
     readonly metadata: BlockMetadata;
     readonly contentSignature: HashEntity;

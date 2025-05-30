@@ -1,3 +1,4 @@
+// import { LogarithmicArray } from "array-t";
 // import type { BufferLike } from "@rapid-d-kit/types";
 
 // import HyChainFormat from "../format";
@@ -8,17 +9,42 @@
 
 // class Block<TPayload = unknown> implements HyChainFormat.IBlock<TPayload> {
 //   static async #UnwrapPayload<T>(input: BufferLike, privateKey: HyChainKeyObject): Promise<T> {
-//     // 
+//     //
 //   }
 
-//   public static async listAll(storage: IStorage): Promise<readonly HyChainFormat.BlockId[]> {
-//     // 
+//   public static async listAll(storage: IStorage): Promise<LogarithmicArray<HyChainFormat.BlockId>> {
+//     try {
+//       return (await storage.getAllBlocks())
+//         .map(item => item._id);
+//     } finally {
+//       storage.dispose();
+//     }
+//   }
+
+//   public static async retrieveAll<T>(storage: IStorage): Promise<LogarithmicArray<Block<T>>> {
+//     try {
+//       const blocks = await storage.getAllBlocks();
+//       const output: LogarithmicArray<Block<T>> = new LogarithmicArray(80);
+//       const unwrapTasks: LogarithmicArray<Promise<void>> = new LogarithmicArray(80);
+      
+//       for(let i = 0; i < blocks.size(); i++) {
+//         const task = async () => {
+//           // 
+//         };
+
+//         unwrapTasks.push(task());
+//       }
+
+//       await Promise.all(unwrapTasks);
+//     } finally {
+//       storage.dispose();
+//     }
 //   }
 
 //   #immutableState: {
 //     readonly privateId: HyChainFormat.BlockId;
 //     readonly publicId: HyChainFormat.BlockId;
-//     readonly transaction: HyChainFormat.ITransaction<TPayload>;
+//     readonly transactions: readonly HyChainFormat.ITransaction<TPayload>[];
 //     readonly sequence: number;
 //     readonly previousSignature: HashEntity;
 //     readonly contentSignature: HashEntity;
@@ -34,7 +60,7 @@
 //   private constructor(
 //     /** Param $0: Private Block ID | Param $1: Public Block ID */
 //     _ids: readonly [HyChainFormat.BlockId, HyChainFormat.BlockId],
-//     _tx: HyChainFormat.ITransaction<TPayload>,
+//     _txs: readonly HyChainFormat.ITransaction<TPayload>[],
 //     _blkSeq: number,
 //     _prevHSign: HashEntity,
 //     _blkCSign: HashEntity,
@@ -45,7 +71,7 @@
 //     this.#immutableState = {
 //       privateId: _ids[0],
 //       publicId: _ids[1],
-//       transaction: _tx,
+//       transactions: _txs,
 //       sequence: _blkSeq,
 //       previousSignature: _prevHSign,
 //       contentSignature: _blkCSign,
@@ -65,9 +91,9 @@
 //     return this.#immutableState.publicId;
 //   }
 
-//   public get transaction(): HyChainFormat.ITransaction<TPayload> {
+//   public get transactions(): readonly HyChainFormat.ITransaction<TPayload>[] {
 //     this.#EnsureNotDisposed();
-//     return this.#immutableState.transaction;
+//     return [ ...this.#immutableState.transactions ];
 //   }
 
 //   public get sequence(): number {

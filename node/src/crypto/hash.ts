@@ -11,7 +11,8 @@ import { CancellationToken, ICancellationToken } from "@rapid-d-kit/async";
 import { consumeBuffer } from "./util";
 import { array } from "../@internals/util";
 import { HyChainException } from "../errors";
-import { BufferReader, BufferWriter, chunkToBuffer, IReader, serialize } from "../@internals/binary-protocol";
+import { jsonSafeStringify } from "../@internals/safe-json";
+import { BufferReader, BufferWriter, chunkToBuffer, IReader } from "../@internals/binary-protocol";
 
 
 export class HashEntity implements IDisposable {
@@ -57,7 +58,9 @@ export class HashEntity implements IDisposable {
     this.#EnsureNotDisposed();
     
     const buffer = new ArrayBuffer(this.#content.byteLength);
-    new Uint8Array(buffer).set(this.#content.read());
+    
+    new Uint8Array(buffer)
+      .set(this.#content.read());
     
     return buffer;
   }
@@ -83,6 +86,16 @@ export class HashEntity implements IDisposable {
 
 
 export namespace MerkleTree {
+  export function serializePayload<T>(payload: T): Buffer {
+    const data = jsonSafeStringify(payload);
+
+    if(data.isLeft()) {
+      throw data.value;
+    }
+
+    return Buffer.from(data.value);
+  }
+
   export async function computeRoot(hashes: readonly BufferLike[] | LogarithmicArray<BufferLike>): Promise<HashEntity> {
     const hashesList = array("log", hashes);
 
@@ -97,7 +110,7 @@ export namespace MerkleTree {
 
       for(let i = 0; i < level.size(); i += 2) {
         const left = level.get(i);
-        const right = level.get(i + 1) ?? left;
+        const right = level.findByIndex(i + 1) ?? left;
 
         const task = async () => {
           const combinedHash = await hashData(Buffer.concat([left, right]));
@@ -115,19 +128,16 @@ export namespace MerkleTree {
   }
 
   export async function createRoot<T>(payload: T): Promise<HashEntity> {
-    const payloadWriter = new BufferWriter();
-    serialize(payloadWriter, payload);
-
-    const data = payloadWriter.drain();
+    const data = serializePayload(payload);
     
     const chunkSize = 1024;
-    const chunks: Buffer[] = [];
+    const chunks: LogarithmicArray<Buffer> = new LogarithmicArray(80);
 
     for(let i = 0; i < data.length; i += chunkSize) {
       chunks.push(data.subarray(i, i + chunkSize));
     }
 
-    if(chunks.length === 0) {
+    if(chunks.size() === 0) {
       chunks.push(data);
     }
 
@@ -171,7 +181,7 @@ export namespace MerkleTree {
 
       for(let i = 0; i < level.size(); i += 2) {
         const left = level.get(i);
-        const right = level.get(i + 1) ?? left;
+        const right = level.findByIndex(i + 1) ?? left;
 
         const combineTask = async () => {
           const combinedHash = await hashData(Buffer.concat([left, right]));
@@ -194,7 +204,6 @@ export namespace MerkleTree {
 
     return proof;
   }
-
 
   export async function verifyProof(
     target: HashEntity | BufferLike,
