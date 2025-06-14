@@ -1,6 +1,6 @@
 import { IOStream } from "ndforge";
 
-import { devNull } from "./@internals/util";
+import { devNull, immediate } from "./@internals/util";
 import { jsonSafeStringify } from "./@internals/safe-json";
 
 
@@ -19,6 +19,7 @@ enum ERROR_CODE {
   ERR_STREAM_CLOSED = 1123,
   ERR_INVALID_TYPE = 1185,
   ERR_MISSING_OBJECT = 1179,
+  ERR_TIMEOUT = 1135,
 }
 
 
@@ -90,7 +91,7 @@ export function stringifyError(err: unknown, description?: string): string {
       context = context.value;
     }
 
-    return `${err.getCode()} (${err.code}): ${err.message}\n\t${description ? ("" + description + "\n\t") : ""}with @context${context ?? "[NULL]"}\n\tat ${stack}`;
+    return `${err.getCode()} (${err.code}): ${err.message}\n\n\t${description ? ("" + description + "\n\n\t") : ""}with @context${context ?? "[NULL]"}\n\n\tat ${stack}`;
   }
 
   if(err instanceof Error)
@@ -100,4 +101,12 @@ export function stringifyError(err: unknown, description?: string): string {
     ("" + String(err)) ||
     "[missing error information]"
   );
+}
+
+
+export function onUnexpected(err: any): void {
+  immediate(() => {
+    // TODO: log error or handle it better
+    throw stringifyError(err);
+  });
 }

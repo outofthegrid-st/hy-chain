@@ -1,5 +1,6 @@
 import { LogarithmicArray } from "array-t";
 
+
 export const MAX_SAFE_SMALL_INTEGER = 1 << 0x1E;
 export const MIN_SAFE_SMALL_INTEGER = -(1 << 0x1E);
 
@@ -104,4 +105,28 @@ export function array<T>(target: "native" | "log", source: T | T[]): T[] | Logar
   }
 
   return Array.isArray(source) ? source : [source];
+}
+
+
+export function immediate<TArgs extends any[]>(callback: (...args: TArgs) => void, ...args: TArgs): { dispose(): void } & Disposable {
+  const hasNativeMethod = typeof setImmediate === "function";
+  const id = hasNativeMethod ? setImmediate(callback, ...args) : setTimeout(callback, 0, ...args);
+
+  return {
+    dispose() {
+      if(hasNativeMethod) {
+        clearImmediate(id as NodeJS.Immediate);
+      } else {
+        clearTimeout(id as NodeJS.Timeout);
+      }
+    },
+
+    [Symbol.dispose]() {
+      if(hasNativeMethod) {
+        clearImmediate(id as NodeJS.Immediate);
+      } else {
+        clearTimeout(id as NodeJS.Timeout);
+      }
+    },
+  };
 }

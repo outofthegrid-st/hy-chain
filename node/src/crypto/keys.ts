@@ -299,7 +299,11 @@ class HyChainKeyObject implements IKey {
       throw new HyChainException("Symmetric key generation was cancelled by token", "ERR_TOKEN_CANCELLED");
     }
 
-    const armorKey = await generateRandomBytes(40, entropy! ?? void 0, token);
+    const armorKey = await (
+      entropy ?
+        generateRandomBytes(40, entropy, token) :
+        generateRandomBytes(40, token)
+    );
 
     return new HyChainKeyObject(
       buffer,
@@ -323,7 +327,11 @@ class HyChainKeyObject implements IKey {
     entropy?: EntropyDevice | EntropyBufferRequest,
     token?: ICancellationToken // eslint-disable-line comma-dangle
   ): Promise<readonly [HyChainKeyObject, HyChainKeyObject]> {
-    const armorKey = await generateRandomBytes(40, entropy! ?? void 0, token);
+    const armorKey = await (
+      entropy ?
+        generateRandomBytes(40, entropy, token) :
+        generateRandomBytes(40, token)
+    );
 
     switch(algorithm) {
       case "RSA": {

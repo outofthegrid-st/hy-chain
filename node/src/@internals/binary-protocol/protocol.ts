@@ -45,7 +45,7 @@ export class BufferWriter implements IWriter {
     const buffer = chunkToBuffer(data);
 
     this.#state.buffers.push(buffer);
-    this.#state.bytes += buffer.byteLength;
+    this.#state.bytes += buffer.length;
   }
 
   public drain(): Buffer {
@@ -89,7 +89,7 @@ export class BufferReader implements IReader {
 
   public constructor(data: BufferLike) {
     this.#data = chunkToBuffer(data);
-    this.#state.total = this.#data.byteLength;
+    this.#state.total = this.#data.length;
   }
 
   public get consumed(): number {
@@ -99,7 +99,7 @@ export class BufferReader implements IReader {
 
   public get remaining(): number {
     this.#EnsureNotDisposed();
-    return this.#data.byteLength - this.#state.cursor;
+    return this.#data.length - this.#state.cursor;
   }
 
   public get byteLength(): number {
@@ -110,7 +110,7 @@ export class BufferReader implements IReader {
   public get buffer(): Buffer {
     this.#EnsureNotDisposed();
 
-    const result = Buffer.alloc(this.#data.byteLength);
+    const result = Buffer.alloc(this.#data.length);
     this.#data.copy(result);
 
     return result;
@@ -120,22 +120,22 @@ export class BufferReader implements IReader {
     if(this.#state.disposed)
       return false;
 
-    return this.#state.cursor < this.#data.byteLength;
+    return this.#state.cursor < this.#data.length;
   }
 
   public read(byteLength?: number): Buffer {
     this.#EnsureNotDisposed();
     
-    if(this.#state.cursor >= this.#data.byteLength) {
+    if(this.#state.cursor >= this.#data.length) {
       throw new HyChainException("The buffer has already been completely consumed", "ERR_END_OF_STREAM");
     }
 
     if(typeof byteLength !== "number") {
-      const remaining = this.#data.byteLength - this.#state.cursor;
+      const remaining = this.#data.length - this.#state.cursor;
       const result = Buffer.alloc(remaining);
 
       this.#data.copy(result, 0, this.#state.cursor);
-      this.#state.cursor = this.#data.byteLength;
+      this.#state.cursor = this.#data.length;
 
       this.#data = null!;
       return result;
@@ -143,7 +143,7 @@ export class BufferReader implements IReader {
 
     assertUnsignedInteger(byteLength, "The length to read from a buffer should be a unsigned integer");
 
-    const remaining = this.#data.byteLength - this.#state.cursor;
+    const remaining = this.#data.length - this.#state.cursor;
     const len = Math.min(byteLength, remaining);
 
     const chunk = Buffer.alloc(len);
@@ -253,7 +253,7 @@ export function serialize(writer: IWriter, data: unknown): void {
     const buffer = Buffer.from(data);
 
     writer.write(BufferPresets.String);
-    writeInt32VQL(writer, buffer.byteLength);
+    writeInt32VQL(writer, buffer.length);
     writer.write(buffer);
 
     // Case C:
@@ -264,7 +264,7 @@ export function serialize(writer: IWriter, data: unknown): void {
     }
 
     writer.write(BufferPresets.Buffer);
-    writeInt32VQL(writer, (data as Buffer).byteLength);
+    writeInt32VQL(writer, (data as Buffer).length);
     writer.write(data as Buffer);
 
     // Case D:
@@ -295,7 +295,7 @@ export function serialize(writer: IWriter, data: unknown): void {
     const buffer = Buffer.from(str.value);
 
     writer.write(BufferPresets.MarshallObject);
-    writeInt32VQL(writer, buffer.byteLength);
+    writeInt32VQL(writer, buffer.length);
     writer.write(buffer);
 
     // Case G:
@@ -310,7 +310,7 @@ export function serialize(writer: IWriter, data: unknown): void {
     const buffer = Buffer.from(str.value);
 
     writer.write(BufferPresets.Object);
-    writeInt32VQL(writer, buffer.byteLength);
+    writeInt32VQL(writer, buffer.length);
     writer.write(buffer);
   }
 }

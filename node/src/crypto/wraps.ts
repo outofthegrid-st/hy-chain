@@ -135,7 +135,7 @@ const ALGORITHM = { length: 16, ivLength: 16 };
 function parseKey(key?: BufferLike | null): readonly [Buffer, Buffer] {
   const buffer = chunkToBuffer(key);
 
-  if(ALGORITHM.length + ALGORITHM.ivLength > buffer.byteLength) {
+  if(ALGORITHM.length + ALGORITHM.ivLength > buffer.length) {
     throw new HyChainException("Failed to parse armor key because it's too short", "ERR_CRYPTO_KEY_SHORT");
   }
 

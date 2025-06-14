@@ -54,7 +54,7 @@ export async function consumeBuffer(
       writer.write(chunkToBuffer(source.read()));
     }
   } else {
-    writer.write(source);
+    writer.write(chunkToBuffer(source));
   }
 
   if(token.isCancellationRequested) {
